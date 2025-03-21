@@ -89,7 +89,10 @@ func (s *darwinLaunchdService) Platform() string {
 
 func (s *darwinLaunchdService) getHomeDir() (string, error) {
 	u, err := user.Current()
-	if err == nil {
+	if s.UserName != "" {
+		u, err = user.Lookup(s.UserName)
+	}
+	if err == nil && u.HomeDir != "" {
 		return u.HomeDir, nil
 	}
 
