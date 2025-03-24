@@ -217,35 +217,62 @@ func (s *darwinLaunchdService) Uninstall() error {
 }
 
 func (s *darwinLaunchdService) Status() (Status, error) {
-	exitCode, out, err := runWithOutput("launchctl", "list", s.Name)
+
+	confPath, err := s.getServiceFilePath()
+	if err != nil {
+		return StatusUnknown, err
+	}
+	if _, err = os.Stat(confPath); err != nil {
+		return StatusUnknown, ErrNotInstalled
+	}
+
+	var domain string
+	if s.userService {
+		if s.UserName == "" {
+			return StatusUnknown, fmt.Errorf("UserName must be specified for user service")
+		}
+		u, err := user.Lookup(s.UserName)
+		if err != nil {
+			return StatusUnknown, fmt.Errorf("failed to lookup user %s: %v", s.UserName, err)
+		}
+		domain = "gui/" + u.Uid
+	} else {
+		domain = "system"
+	}
+
+	fullServiceName := domain + "/" + s.Name
+
+	exitCode, out, err := runWithOutput("launchctl", "print", fullServiceName)
 	if exitCode == 0 && err != nil {
 		if !strings.Contains(err.Error(), "failed with stderr") {
 			return StatusUnknown, err
 		}
 	}
 
-	re := regexp.MustCompile(`"PID" = ([0-9]+);`)
-	matches := re.FindStringSubmatch(out)
+	re := regexp.MustCompile(`pid = ([0-9]+)`)
+	matches := re.FindStringSubmatch(string(out))
 	if len(matches) == 2 {
 		return StatusRunning, nil
 	}
 
-	confPath, err := s.getServiceFilePath()
-	if err != nil {
-		return StatusUnknown, err
-	}
-
-	if _, err = os.Stat(confPath); err == nil {
-		return StatusStopped, nil
-	}
-
-	return StatusUnknown, ErrNotInstalled
+	return StatusStopped, nil
 }
 
 func (s *darwinLaunchdService) Start() error {
 	confPath, err := s.getServiceFilePath()
 	if err != nil {
 		return err
+	}
+	if s.userService {
+		if s.UserName == "" {
+			return fmt.Errorf("UserName must be specified for user service")
+		}
+		u, err := user.Lookup(s.UserName)
+		if err != nil {
+			return fmt.Errorf("failed to lookup user %s: %v", s.UserName, err)
+		}
+		domain := "gui/" + u.Uid
+		return run("launchctl", "bootstrap", domain, confPath)
 	}
 	return run("launchctl", "load", confPath)
 }
@@ -254,6 +281,17 @@ func (s *darwinLaunchdService) Stop() error {
 	confPath, err := s.getServiceFilePath()
 	if err != nil {
 		return err
+	}
+	if s.userService {
+		if s.UserName == "" {
+			return fmt.Errorf("UserName must be specified for user service")
+		}
+		u, err := user.Lookup(s.UserName)
+		if err != nil {
+			return fmt.Errorf("failed to lookup user %s: %v", s.UserName, err)
+		}
+		domain := "gui/" + u.Uid
+		return run("launchctl", "bootout", domain, confPath)
 	}
 	return run("launchctl", "unload", confPath)
 }
